@@ -93,6 +93,18 @@ class AppProvider extends ChangeNotifier {
     setLoading(false);
   }
 
+  /// Update user profile (for inline edits, without full reload)
+  Future<void> updateUserProfile(UserProfile profile) async {
+    try {
+      await _db.saveUserProfile(profile);
+      _userProfile = profile;
+      notifyListeners();
+    } catch (e) {
+      setError(e.toString());
+    }
+  }
+
+
   // Meals
   Future<void> addMeal(Meal meal) async {
     try {
@@ -262,6 +274,68 @@ class AppProvider extends ChangeNotifier {
     setLoading(true);
     try {
       final plan = await _ai.generateWeeklyMealPlan(_userProfile!);
+      
+      // Map day names to day indices (0=Monday, 6=Sunday)
+      final dayNameToIndex = {
+        'monday': 0, 'tuesday': 1, 'wednesday': 2, 'thursday': 3,
+        'friday': 4, 'saturday': 5, 'sunday': 6
+      };
+      
+      // Start from today and plan for the next 7 days
+      final today = DateTime.now();
+      final todayDayOfWeek = (today.weekday - 1) % 7; // 0=Monday, 6=Sunday
+      
+      // Process each day's meals
+      for (final dayName in plan.keys) {
+        final targetDayIndex = dayNameToIndex[dayName.toLowerCase()];
+        if (targetDayIndex == null) continue;
+        
+        // Calculate offset from today to reach this day name in the next 7 days
+        int daysUntil = (targetDayIndex - todayDayOfWeek) % 7;
+        if (daysUntil == 0 && plan.keys.toList().indexOf(dayName) > 0) {
+          // If this is not the first day processed and offset is 0, it's next week
+          daysUntil = 7;
+        }
+        
+        final dayDate = DateTime(today.year, today.month, today.day + daysUntil);
+        final dayMeals = plan[dayName]!;
+        
+        int? breakfastId, lunchId, dinnerId, snackId;
+        
+        // Save each meal and get its ID
+        for (final meal in dayMeals) {
+          final savedId = await _db.insertMeal(meal);
+          final savedMeal = meal.copyWith(id: savedId);
+          _meals.add(savedMeal);
+          
+          switch (meal.category.toLowerCase()) {
+            case 'breakfast':
+              breakfastId = savedId;
+              break;
+            case 'lunch':
+              lunchId = savedId;
+              break;
+            case 'dinner':
+              dinnerId = savedId;
+              break;
+            case 'snack':
+              snackId = savedId;
+              break;
+          }
+        }
+        
+        // Create meal plan for this day
+        final mealPlan = MealPlan(
+          date: dayDate,
+          breakfastId: breakfastId,
+          lunchId: lunchId,
+          dinnerId: dinnerId,
+          snackId: snackId,
+        );
+        await _db.saveMealPlan(mealPlan);
+      }
+      
+      notifyListeners();
       setLoading(false);
       return plan;
     } catch (e) {
@@ -278,6 +352,14 @@ class AppProvider extends ChangeNotifier {
     } catch (e) {
       return 'Sorry, I encountered an error: $e';
     }
+  }
+
+  /// Streaming chat - yields tokens for real-time display
+  Stream<String> chatWithAIStream(String message) {
+    if (_userProfile == null) {
+      return Stream.value('Please complete onboarding first.');
+    }
+    return _ai.chatStream(_userProfile!, message);
   }
 
   Future<void> generateAndSaveShoppingList(List<Meal> meals) async {

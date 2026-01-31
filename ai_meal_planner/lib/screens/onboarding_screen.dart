@@ -25,18 +25,18 @@ class _OnboardingScreenState extends State<OnboardingScreen>
   double _weightKg = 70;
   WeightGoal _primaryGoal = WeightGoal.maintain;
   double _targetWeight = 70;
-  String _weightLossSpeed = 'moderate';
+  final String _weightLossSpeed = 'moderate';
   ActivityLevel _activityLevel = ActivityLevel.moderate;
   DietType _dietType = DietType.nonVeg;
   final List<String> _allergies = [];
   final List<String> _dislikedFoods = [];
   final List<String> _preferredCuisines = [];
-  String _healthGoal = 'general';
+  final String _healthGoal = 'general';
   int _cookingTimeMinutes = 30;
-  String _kitchenSetup = 'intermediate';
+  final String _kitchenSetup = 'intermediate';
   int _cookingDaysPerWeek = 5;
   final List<int> _vegDays = [];
-  double _weeklyBudget = 100;
+  double _weeklyBudget = 2000;
   CookingLevel _cookingLevel = CookingLevel.intermediate;
 
   late AnimationController _animController;
@@ -1006,7 +1006,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                 const Text('💰', style: TextStyle(fontSize: 48)),
                 const SizedBox(height: 16),
                 Text(
-                  '\$${_weeklyBudget.round()}',
+                  '₹${_weeklyBudget.round()}',
                   style: const TextStyle(
                     fontSize: 48,
                     fontWeight: FontWeight.bold,
@@ -1020,8 +1020,8 @@ class _OnboardingScreenState extends State<OnboardingScreen>
                 const SizedBox(height: 16),
                 Slider(
                   value: _weeklyBudget,
-                  min: 25,
-                  max: 500,
+                  min: 500,
+                  max: 10000,
                   divisions: 19,
                   activeColor: Colors.white,
                   inactiveColor: Colors.white24,

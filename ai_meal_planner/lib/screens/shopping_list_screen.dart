@@ -173,7 +173,9 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
                               );
 
                               if (confirm == true) {
-                                context.read<AppProvider>().clearShoppingList();
+                                if (context.mounted) {
+                                  context.read<AppProvider>().clearShoppingList();
+                                }
                               }
                             },
                           ),
@@ -313,6 +315,7 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
   Widget _buildEmptyState() {
     return Center(
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
@@ -323,15 +326,15 @@ class _ShoppingListScreenState extends State<ShoppingListScreen> {
             ),
             child: const Icon(Icons.shopping_basket_rounded, size: 48, color: AppTheme.accentTeal),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
           const Text(
             'Your cart is empty 🛒',
             style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppTheme.textPrimary),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           Text(
             'Add items manually or generate from meals',
-            style: TextStyle(color: Colors.grey.shade600),
+            style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
           ),
         ],
       ),

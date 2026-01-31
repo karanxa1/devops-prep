@@ -142,28 +142,34 @@ Respond with ONLY the JSON array, no other text.'''
     UserProfile profile,
   ) async {
     final userContext = _buildUserContext(profile);
+    final days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+    final Map<String, List<Meal>> result = {};
+    
+    // Generate 2-3 days at a time to avoid token limits
+    for (int i = 0; i < days.length; i += 3) {
+      final batchDays = days.skip(i).take(3).toList();
+      
+      final messages = [
+        {
+          'role': 'system',
+          'content': '''You are a nutritionist. Generate meals for ${batchDays.length} days.
 
-    final messages = [
-      {
-        'role': 'system',
-        'content': '''You are an expert nutritionist. Generate a complete weekly meal plan.
-
-IMPORTANT: Respond with ONLY a valid JSON object. No markdown, no explanations.
+RESPOND WITH ONLY VALID JSON. NO MARKDOWN.
 
 Format:
 {
-  "monday": {"breakfast": {...}, "lunch": {...}, "dinner": {...}, "snack": {...}},
-  "tuesday": {...},
-  ...
+  "${batchDays[0]}": {"breakfast": {...}, "lunch": {...}, "dinner": {...}},
+  ${batchDays.length > 1 ? '"${batchDays[1]}": {...},' : ''}
+  ${batchDays.length > 2 ? '"${batchDays[2]}": {...}' : ''}
 }
 
-Each meal object must have:
+Each meal:
 {
-  "name": "string",
-  "description": "string",
-  "category": "breakfast|lunch|dinner|snack",
-  "ingredients": ["ingredient with quantity"],
-  "instructions": "string",
+  "name": "short name",
+  "description": "1 sentence",
+  "category": "breakfast|lunch|dinner",
+  "ingredients": ["ingredient"],
+  "instructions": "Step 1. xxx\\nStep 2. xxx",
   "calories": number,
   "protein": number,
   "carbs": number,
@@ -174,50 +180,71 @@ Each meal object must have:
   "isVegetarian": boolean,
   "isVegan": boolean
 }'''
-      },
-      {
-        'role': 'user',
-        'content': '''$userContext
+        },
+        {
+          'role': 'user',
+          'content': '''$userContext
 
-Vegetarian days (0=Monday): ${profile.vegDays.map((d) => ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][d]).join(', ')}
+Generate meals for: ${batchDays.map((d) => d[0].toUpperCase() + d.substring(1)).join(', ')}
 
-Generate a balanced 7-day meal plan that:
-1. Distributes daily calories across meals (25% breakfast, 35% lunch, 30% dinner, 10% snack)
-2. Ensures variety across the week
-3. Uses meal prep efficiently
-4. Respects vegetarian days
-5. Stays within weekly budget
+Keep each meal simple with 3-5 ingredients max. Short descriptions.
+Target: ${profile.dailyCalorieTarget.round()} kcal/day
 
-Respond with ONLY the JSON object.'''
-      }
-    ];
+RESPOND WITH ONLY THE JSON OBJECT.'''
+        }
+      ];
 
-    final response = await _sendMessage(messages);
-    
-    try {
-      String cleanedResponse = response.trim();
-      if (cleanedResponse.startsWith('```')) {
-        cleanedResponse = cleanedResponse
-            .replaceAll(RegExp(r'^```\w*\n?'), '')
-            .replaceAll(RegExp(r'\n?```$'), '');
-      }
+      final response = await _sendMessageWithHigherLimit(messages);
       
-      final Map<String, dynamic> weekPlan = jsonDecode(cleanedResponse);
-      final Map<String, List<Meal>> result = {};
-      
-      for (final day in weekPlan.keys) {
-        final dayMeals = weekPlan[day] as Map<String, dynamic>;
-        result[day] = [];
-        for (final mealType in ['breakfast', 'lunch', 'dinner', 'snack']) {
-          if (dayMeals.containsKey(mealType)) {
-            result[day]!.add(Meal.fromJson(dayMeals[mealType]));
+      try {
+        String cleanedResponse = response.trim();
+        if (cleanedResponse.startsWith('```')) {
+          cleanedResponse = cleanedResponse
+              .replaceAll(RegExp(r'^```\w*\n?'), '')
+              .replaceAll(RegExp(r'\n?```$'), '');
+        }
+        
+        final Map<String, dynamic> batchPlan = jsonDecode(cleanedResponse);
+        
+        for (final day in batchPlan.keys) {
+          final dayMeals = batchPlan[day] as Map<String, dynamic>;
+          result[day] = [];
+          for (final mealType in ['breakfast', 'lunch', 'dinner']) {
+            if (dayMeals.containsKey(mealType)) {
+              result[day]!.add(Meal.fromJson(dayMeals[mealType]));
+            }
           }
         }
+      } catch (e) {
+        throw Exception('Failed to parse meal plan for ${batchDays.join(", ")}: $e');
       }
-      
-      return result;
-    } catch (e) {
-      throw Exception('Failed to parse weekly meal plan: $e');
+    }
+    
+    return result;
+  }
+
+  Future<String> _sendMessageWithHigherLimit(List<Map<String, dynamic>> messages) async {
+    final response = await http.post(
+      Uri.parse('$_baseUrl/chat/completions'),
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $_apiKey',
+      },
+      body: jsonEncode({
+        'model': _model,
+        'messages': messages,
+        'max_completion_tokens': 8192,
+        'temperature': 0.6,
+        'top_p': 0.9,
+        'stream': false,
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      return data['choices'][0]['message']['content'] ?? '';
+    } else {
+      throw Exception('AI request failed: ${response.statusCode}');
     }
   }
 
@@ -285,5 +312,75 @@ Be helpful, concise, and personalized to their goals.'''
     ];
 
     return await _sendMessage(messages);
+  }
+
+  /// Streaming version of chat - yields tokens as they arrive
+  Stream<String> chatStream(UserProfile profile, String userMessage) async* {
+    final userContext = _buildUserContext(profile);
+
+    final messages = [
+      {
+        'role': 'system',
+        'content': '''You are a friendly AI nutritionist and meal planning assistant. Help users with:
+- Meal suggestions and recipes
+- Nutrition advice
+- Cooking tips
+- Dietary guidance
+- Shopping and meal prep tips
+
+User's Profile:
+$userContext
+
+Be helpful, concise, and personalized to their goals.'''
+      },
+      {
+        'role': 'user',
+        'content': userMessage,
+      }
+    ];
+
+    final request = http.Request('POST', Uri.parse('$_baseUrl/chat/completions'));
+    request.headers.addAll({
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer $_apiKey',
+    });
+    request.body = jsonEncode({
+      'model': _model,
+      'messages': messages,
+      'max_completion_tokens': 2048,
+      'temperature': 0.7,
+      'stream': true,
+    });
+
+    final client = http.Client();
+    try {
+      final response = await client.send(request);
+      
+      if (response.statusCode != 200) {
+        throw Exception('Streaming request failed: ${response.statusCode}');
+      }
+
+      await for (final chunk in response.stream.transform(utf8.decoder)) {
+        // Parse SSE format: data: {...}
+        final lines = chunk.split('\n');
+        for (final line in lines) {
+          if (line.startsWith('data: ') && !line.contains('[DONE]')) {
+            try {
+              final jsonStr = line.substring(6);
+              if (jsonStr.trim().isEmpty) continue;
+              final data = jsonDecode(jsonStr);
+              final delta = data['choices']?[0]?['delta']?['content'];
+              if (delta != null && delta is String && delta.isNotEmpty) {
+                yield delta;
+              }
+            } catch (_) {
+              // Skip malformed chunks
+            }
+          }
+        }
+      }
+    } finally {
+      client.close();
+    }
   }
 }
